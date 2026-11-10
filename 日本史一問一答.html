@@ -1,0 +1,160 @@
+<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>日本史一問一答</title>
+<style>
+:root{--bg:#fff;--fg:#1b1f24;--mu:#6b7280;--bd:#d9dde3;--pr:#1d4ed8;--ok:#15803d;--ng:#b91c1c;--cd:#f5f7fa;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#14171c;--fg:#e8eaed;--mu:#9aa3af;--bd:#2f353d;--pr:#6c9bff;--ok:#4ade80;--ng:#f87171;--cd:#1d2128;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#14171c;--fg:#e8eaed;--mu:#9aa3af;--bd:#2f353d;--pr:#6c9bff;--ok:#4ade80;--ng:#f87171;--cd:#1d2128;color-scheme:dark}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.7 -apple-system,"Hiragino Sans","Yu Gothic",sans-serif}
+#app{max-width:860px;margin:0 auto;padding:14px}h1{font-size:22px;margin:6px 0 14px}h2{font-size:18px;margin:14px 0 8px}
+.g{display:grid;gap:10px}.g2{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.c{background:var(--cd);border:1px solid var(--bd);border-radius:12px;padding:14px;text-align:left;color:var(--fg);font:inherit;width:100%}
+button.c{cursor:pointer;min-height:56px}.c small{display:block;color:var(--mu)}
+button,select,input,textarea{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:10px 12px;min-height:46px}
+textarea{width:100%}input[type=text],input[type=number],select{width:100%}
+.b{cursor:pointer;background:var(--pr);color:#fff;border:0;font-weight:600}.b.ok{background:var(--ok)}.b.ng{background:var(--ng)}.b.s{background:var(--cd);color:var(--fg);border:1px solid var(--bd);font-weight:400}.b.on{outline:3px solid var(--pr)}
+.r{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.r>*{flex:1}.q{font-size:18px;margin:10px 0}.mu{color:var(--mu)}
+.bar{height:8px;background:var(--bd);border-radius:6px;overflow:hidden}.bar i{display:block;height:100%;background:var(--pr)}
+.res{padding:12px;border-radius:10px;margin:10px 0;border:2px solid}.res.ok{border-color:var(--ok)}.res.ng{border-color:var(--ng)}
+canvas{width:100%;height:42vh;min-height:220px;background:#fff;border:2px solid var(--bd);border-radius:12px;touch-action:none}
+label{display:block;margin:8px 0 2px;color:var(--mu);font-size:14px}.opt{display:block;padding:12px;border:1px solid var(--bd);border-radius:10px;margin:8px 0;cursor:pointer}
+.opt input{min-height:0;margin-right:8px}.row{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--bd)}
+.row span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.row button{flex:none;padding:6px 12px;min-height:38px}
+.f{display:none}.f.v{display:block}table{width:100%;border-collapse:collapse}td{padding:4px 6px}
+</style></head><body><div id="app">読み込み中…</div>
+<script>
+const ERAS=["旧石器・新石器","弥生・古墳","飛鳥","奈良","平安","室町","戦国・安土桃山","江戸","東京（明治）","大正・昭和","戦後"];
+const MODES=[["kaki","書き","ペンで答えを書いて自己採点"],["anki","暗記（クソ問）","キーボードで入力、自動判定"],["seiji","年代整序","3つの出来事を年代順に"],["dochi","これどっち？","2択で正しい方を選ぶ"],["daigaku","大学過去問","選択式・記述式の過去問"]];
+const MN=Object.fromEntries(MODES.map(m=>[m[0],m[1]]));
+let db,uid,admin=false,Q=[],REV=new Set(),LOG=[],S={},P;
+const A=document.getElementById("app");
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const norm=s=>String(s).normalize("NFKC").replace(/\s+/g,"").toLowerCase();
+const shuf=a=>{a=[...a];for(let i=a.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[a[i],a[j]]=[a[j],a[i]]}return a};
+const eraOpts=(all,sel)=>ERAS.map(e=>`<option ${e===sel?"selected":""}>${e}</option>`).join("")+(all?`<option ${sel==="すべて"?"selected":""}>すべて</option>`:"");
+const modeOpts=sel=>MODES.map(m=>`<option value="${m[0]}" ${m[0]===sel?"selected":""}>${m[1]}</option>`).join("");
+const $=id=>document.getElementById(id);
+function toast(t){alert(t)}
+async function init(){
+ try{
+  const u=await claude.use("user"),d=await claude.use("db");
+  if(!u||!d){A.innerHTML='<h1>日本史一問一答</h1><p>ログインした状態で、共有リンクからこのページを開いてください。データベースが利用できません。</p>';return}
+  db=d;uid=await u.id();admin=!!u.canEdit();P="data/users/"+uid;await load();home();
+ }catch(e){A.innerHTML="<p>起動に失敗しました："+esc(e.message||e)+"</p>"}
+}
+async function load(){
+ const [q,m]=await Promise.all([db.collection("questions").get(),db.collection(P).get()]);
+ Q=q.docs.map(d=>({id:d.id,...d.data()}));LOG=[];REV=new Set();
+ m.docs.forEach(d=>{const x=d.data();if(d.id[0]==="l")LOG.push(x);else if(d.id.startsWith("r_"))REV.add(x.qid)});
+}
+function home(){
+ S={};
+ A.innerHTML=`<h1>日本史一問一答</h1><div class="g g2">${MODES.map(m=>`<button class="c" onclick="modeScr('${m[0]}')"><b>${m[1]}</b><small>${m[2]}</small></button>`).join("")}</div>
+ <h2>メニュー</h2><div class="g g2"><button class="c" onclick="stats()">学習記録</button><button class="c" onclick="modeScr('')">復習問題（全モード）<small>復習対象 ${REV.size} 問</small></button>
+ ${admin?'<button class="c" onclick="adm()">管理者画面</button>':""}<button class="c" onclick="sett()">設定</button></div><p class="mu">登録問題数：${Q.length}</p>`;
+}
+function sett(){A.innerHTML=`<h1>設定</h1><label>表示テーマ</label><select onchange="document.documentElement.dataset.theme=this.value"><option value="">端末に合わせる</option><option value="light">ライト</option><option value="dark">ダーク</option></select><p class="mu">権限：${admin?"管理者":"一般ユーザー"}</p><button class="b" onclick="home()">戻る</button>`}
+function modeScr(m){
+ S.mode=m;S.rev=false;
+ A.innerHTML=`<h1>${m?MN[m]:"復習問題"}</h1><div class="r"><button class="b" id="t0" onclick="S.rev=false;t0.classList.add('on');t1.classList.remove('on')">解答</button><button class="b s" id="t1" onclick="S.rev=true;t1.classList.add('on');t0.classList.remove('on')">復習</button></div>
+ ${m?"":'<label>モード</label><select id="mm">'+'<option value="">すべて</option>'+modeOpts("")+"</select>"}
+ <label>時代</label><select id="era">${eraOpts(true,"すべて")}</select>
+ ${m==="daigaku"?'<label>大学名（空欄で全大学）</label><input type="text" id="uni">':""}
+ <div class="r"><button class="b s" onclick="home()">戻る</button><button class="b" onclick="start()">開始</button></div>`;
+ if(!m){S.rev=true;t1.click()}else t0.classList.add("on");
+}
+function start(){
+ const m=S.mode||($("mm")?$("mm").value:""),era=$("era").value,uni=$("uni")?norm($("uni").value):"";
+ let pool=Q.filter(q=>(!m||q.mode===m)&&(era==="すべて"||q.era===era)&&(!uni||norm(q.univ||"").includes(uni))&&(!S.rev||REV.has(q.id)));
+ if(!pool.length){A.innerHTML=`<p>${S.rev?"復習する問題はありません":"該当する問題がありません"}</p><button class="b" onclick="home()">ホームへ</button>`;return}
+ S.list=shuf(pool).slice(0,100);S.i=0;S.era=era;S.ok=0;S.m=m;show();
+}
+function show(){
+ const q=S.list[S.i],n=S.list.length;S.done=false;
+ A.innerHTML=`<div class="mu">${S.i+1} / ${n}　残り ${n-S.i-1} 問${q.univ?"　｜　"+esc(q.univ)+(q.year?" "+esc(q.year):""):""}</div><div class="bar"><i style="width:${S.i/n*100}%"></i></div><div class="q">${esc(q.q)}</div><div id="body"></div><div id="out"></div>`;
+ const b=$("body");
+ if(q.mode==="kaki"){
+  b.innerHTML=`<canvas id="cv"></canvas><div class="r"><button class="b s" onclick="pen(2)">細い</button><button class="b s" onclick="pen(5)">普通</button><button class="b s" onclick="pen(10)">太い</button><button class="b s" onclick="ers()">消しゴム</button><button class="b s" onclick="clr()">全消去</button></div><div class="r" id="act"><button class="b" onclick="reveal()">解答表示</button></div>`;initCv();
+ }else if(q.mode==="anki"||(q.mode==="daigaku"&&q.type!=="choice")){
+  b.innerHTML=`<input type="text" id="ans" autocomplete="off" onkeydown="if(event.key==='Enter')judge()"><div class="r"><button class="b" onclick="judge()">解答</button></div>`;
+ }else if(q.mode==="seiji"){
+  S.disp=shuf([0,1,2]);const perms=["1→2→3","1→3→2","2→1→3","2→3→1","3→1→2","3→2→1"];
+  b.innerHTML=S.disp.map((x,k)=>`<div class="c" style="margin:6px 0"><b>${k+1}.</b> ${esc(q.ev[x].t)}</div>`).join("")+`<label>古い順に並べると</label><select id="ans">${perms.map(p=>`<option>${p}</option>`).join("")}</select><div class="r"><button class="b" onclick="judge()">解答</button></div>`;
+ }else{
+  S.opts=q.mode==="dochi"?shuf([q.a,q.b]).map(t=>({t,ok:t===q.a})):q.choices.map((t,k)=>({t,ok:String(k+1)===String(q.a)}));
+  b.innerHTML=S.opts.map((o,k)=>`<label class="opt"><input type="radio" name="o" value="${k}">${esc(o.t)}</label>`).join("")+`<div class="r"><button class="b" onclick="judge()">解答</button></div>`;
+ }
+}
+let cx,pw=5,er=false;
+function initCv(){const c=$("cv"),d=devicePixelRatio||1;c.width=c.clientWidth*d;c.height=c.clientHeight*d;cx=c.getContext("2d");cx.scale(d,d);cx.lineCap=cx.lineJoin="round";pw=5;er=false;let dn=false;
+ const p=e=>{const r=c.getBoundingClientRect();return[e.clientX-r.left,e.clientY-r.top]};
+ c.onpointerdown=e=>{dn=true;c.setPointerCapture(e.pointerId);const[x,y]=p(e);cx.globalCompositeOperation=er?"destination-out":"source-over";cx.strokeStyle="#000";cx.lineWidth=er?28:pw;cx.beginPath();cx.moveTo(x,y);cx.lineTo(x+.01,y);cx.stroke()};
+ c.onpointermove=e=>{if(!dn)return;const[x,y]=p(e);cx.lineTo(x,y);cx.stroke()};c.onpointerup=c.onpointercancel=()=>dn=false}
+const pen=w=>{pw=w;er=false},ers=()=>er=true,clr=()=>{const c=$("cv");cx.save();cx.setTransform(1,0,0,1,0,0);cx.clearRect(0,0,c.width,c.height);cx.restore()};
+function reveal(){const q=S.list[S.i];$("act").innerHTML=`<button class="b ok" onclick="fin(true)">正解</button><button class="b ng" onclick="fin(false)">不正解</button>`;$("out").innerHTML=`<div class="res">正解：<b>${esc(q.a)}</b>${q.exp?"<br>"+esc(q.exp):""}</div>`}
+function judge(){
+ if(S.done)return;const q=S.list[S.i];let ok,ans;
+ if(q.mode==="seiji"){const want=q.ord.map(i=>S.disp.indexOf(i)+1).join("→");ok=$("ans").value===want;ans="正しい順："+want+"<br>"+q.ord.map(i=>esc(q.ev[i].t)+"（"+esc(q.ev[i].y)+"）").join("<br>")}
+ else if(S.opts){const s=document.querySelector("input[name=o]:checked");if(!s)return toast("選択してください");ok=S.opts[s.value].ok;ans="正解："+esc(S.opts.find(o=>o.ok)?.t)}
+ else{const v=norm($("ans").value);if(!v)return;ok=[q.a,...(q.alts||[])].some(x=>norm(x)===v);ans="正解："+esc(q.a)}
+ $("body").querySelectorAll("button,input,select").forEach(e=>e.disabled=true);
+ $("out").innerHTML=`<div class="res ${ok?"ok":"ng"}"><b>${ok?"正解！":"不正解"}</b><br>${ans}${q.exp?"<br>"+esc(q.exp):""}</div><div class="r"><button class="b" onclick="fin(${ok},1)">${S.i+1<S.list.length?"次の問題":"結果を見る"}</button></div>`;S.done=true;S.pend=ok;
+}
+async function fin(ok,already){
+ const q=S.list[S.i];
+ try{
+  const at=Date.now(),l={kind:"log",qid:q.id,mode:q.mode,era:S.era,qera:q.era,ok,at};
+  await db.collection(P).doc("l"+at+Math.random().toString(36).slice(2,6)).set(l);LOG.push(l);
+  if(ok){await db.collection(P).doc("r_"+q.id).delete();REV.delete(q.id)}else{await db.collection(P).doc("r_"+q.id).set({kind:"rev",qid:q.id});REV.add(q.id)}
+ }catch(e){toast("記録の保存に失敗しました："+(e.message||e))}
+ if(ok)S.ok++;S.i++;
+ if(S.i>=S.list.length){A.innerHTML=`<h1>結果</h1><p class="q">${S.ok} / ${S.list.length} 問正解</p><div class="r"><button class="b s" onclick="home()">ホーム</button><button class="b" onclick="stats()">学習記録</button></div>`}else show();
+}
+function pct(a){return a.length?Math.round(a.filter(x=>x.ok).length/a.length*100):0}
+function stats(){
+ const t=LOG.length,ok=LOG.filter(x=>x.ok).length;
+ const bars=(keys,f)=>keys.map(k=>{const a=LOG.filter(x=>f(x)===k);return `<tr><td style="width:38%">${esc(MN[k]||k)}</td><td><div class="bar"><i style="width:${pct(a)}%"></i></div></td><td style="width:90px;text-align:right">${pct(a)}%（${a.length}）</td></tr>`}).join("");
+ A.innerHTML=`<h1>学習記録</h1><div class="g g2"><div class="c">累計解答<br><b style="font-size:24px">${t}</b></div><div class="c">正解 / 不正解<br><b style="font-size:24px">${ok} / ${t-ok}</b></div><div class="c">正解率<br><b style="font-size:24px">${pct(LOG)}%</b></div><div class="c">復習対象<br><b style="font-size:24px">${REV.size}</b></div></div>
+ <h2>モード別正解率</h2><table>${bars(MODES.map(m=>m[0]),x=>x.mode)}</table><h2>時代別正解率</h2><table>${bars(ERAS,x=>x.qera)}</table><div class="r"><button class="b" onclick="home()">戻る</button></div>`;
+}
+/* 管理者 */
+function adm(){
+ S.af=S.af||{m:"",e:"",s:""};const f=S.af;
+ const L=Q.filter(q=>(!f.m||q.mode===f.m)&&(!f.e||q.era===f.e)&&(!f.s||norm(q.q+(q.univ||"")).includes(norm(f.s))));
+ A.innerHTML=`<h1>管理者画面</h1><div class="r"><button class="b s" onclick="home()">戻る</button><button class="b" onclick="frm()">新規登録</button></div>
+ <div class="g g2"><select onchange="S.af.m=this.value;adm()"><option value="">全モード</option>${modeOpts(f.m)}</select><select onchange="S.af.e=this.value;adm()"><option value="">全時代</option>${eraOpts(false,f.e)}</select></div>
+ <input type="text" placeholder="検索" value="${esc(f.s)}" style="margin-top:8px" onchange="S.af.s=this.value;adm()"><p class="mu">${L.length} / ${Q.length} 件（表示は最大200件）</p>
+ ${L.slice(0,200).map(q=>`<div class="row"><span>[${MN[q.mode]}・${esc(q.era)}] ${esc(q.q)}</span><button class="b s" onclick="frm('${q.id}')">編集</button><button class="b ng" onclick="del('${q.id}')">削除</button></div>`).join("")}`;
+}
+async function del(id){if(!confirm("削除しますか？"))return;try{await db.collection("questions").doc(id).delete();Q=Q.filter(q=>q.id!==id);adm()}catch(e){toast("削除失敗："+(e.message||e))}}
+function frm(id){
+ const q=Q.find(x=>x.id===id)||{mode:"anki",era:ERAS[0],ev:[{},{},{}]};S.eid=id||null;
+ const F=(c,l,h)=>`<div class="f ${c}" data-m="${c}"><label>${l}</label>${h}</div>`;
+ A.innerHTML=`<h1>${id?"問題の編集":"問題の新規登録"}</h1><label>解答モード</label><select id="fm" onchange="fv()">${modeOpts(q.mode)}</select><label>時代</label><select id="fe">${eraOpts(false,q.era)}</select>
+ ${F("daigaku","大学名",`<input type="text" id="fu" value="${esc(q.univ)}">`)}${F("daigaku","出題年度",`<input type="text" id="fy" value="${esc(q.year)}">`)}
+ ${F("daigaku","解答方式",`<select id="ft"><option value="text" ${q.type!=="choice"?"selected":""}>記述式</option><option value="choice" ${q.type==="choice"?"selected":""}>選択肢式</option></select>`)}
+ <label>問題文</label><textarea id="fq" rows="3">${esc(q.q)}</textarea>
+ ${F("kaki anki daigaku","正解（選択肢式は正解の番号）",`<input type="text" id="fa" value="${esc(q.a)}">`)}
+ ${F("anki daigaku","別解（1行に1つ）",`<textarea id="fl" rows="2">${esc((q.alts||[]).join("\n"))}</textarea>`)}
+ ${F("dochi","正解の選択肢",`<input type="text" id="fda" value="${esc(q.mode==="dochi"?q.a:"")}">`)}${F("dochi","誤りの選択肢",`<input type="text" id="fdb" value="${esc(q.b)}">`)}
+ ${F("daigaku","選択肢（選択肢式のみ、1行に1つ）",`<textarea id="fc" rows="4">${esc((q.choices||[]).join("\n"))}</textarea>`)}
+ ${[0,1,2].map(i=>F("seiji","出来事"+"ABC"[i]+"と年代（西暦の数値）",`<div class="r"><input type="text" id="et${i}" value="${esc(q.ev?.[i]?.t)}"><input type="number" id="ey${i}" value="${esc(q.ev?.[i]?.y)}" style="max-width:120px"></div>`)).join("")}
+ <label>解説</label><textarea id="fx" rows="3">${esc(q.exp)}</textarea><div class="r"><button class="b s" onclick="adm()">キャンセル</button><button class="b" onclick="save()">保存</button></div>`;fv();
+}
+function fv(){const m=$("fm").value;document.querySelectorAll(".f").forEach(e=>e.classList.toggle("v",e.dataset.m.split(" ").includes(m)))}
+async function save(){
+ const m=$("fm").value,g=i=>$(i)?$(i).value.trim():"",lines=i=>g(i).split("\n").map(s=>s.trim()).filter(Boolean);
+ const d={mode:m,era:g("fe"),q:g("fq"),exp:g("fx"),updated:Date.now()};
+ if(!d.q)return toast("問題文を入力してください");
+ if(m==="kaki"||m==="anki"){d.a=g("fa");if(!d.a)return toast("正解を入力してください");if(m==="anki")d.alts=lines("fl")}
+ if(m==="dochi"){d.a=g("fda");d.b=g("fdb");if(!d.a||!d.b||d.a===d.b)return toast("2つの異なる選択肢を入力してください")}
+ if(m==="seiji"){d.ev=[0,1,2].map(i=>({t:g("et"+i),y:Number(g("ey"+i))}));if(d.ev.some(e=>!e.t||!g("ey"+(d.ev.indexOf(e)))))return toast("出来事と年代を3つとも入力してください");
+  if(new Set(d.ev.map(e=>e.y)).size<3)return toast("年代が同じ出来事があります。順序が一意になるよう年代を修正してください");d.ord=[0,1,2].sort((a,b)=>d.ev[a].y-d.ev[b].y)}
+ if(m==="daigaku"){d.univ=g("fu");d.year=g("fy");d.type=g("ft");d.a=g("fa");if(!d.univ||!d.a)return toast("大学名と正解を入力してください");
+  if(d.type==="choice"){d.choices=lines("fc");if(d.choices.length<2||!(+d.a>=1&&+d.a<=d.choices.length))return toast("選択肢を2つ以上、正解は番号で入力してください")}else d.alts=lines("fl")}
+ try{
+  if(S.eid){await db.collection("questions").doc(S.eid).update(d);Object.assign(Q.find(x=>x.id===S.eid),d)}
+  else{d.created=Date.now();const r=await db.collection("questions").add(d);Q.push({id:r.id,...d})}
+  adm();
+ }catch(e){toast("保存に失敗しました："+(e.message||e))}
+}
+init();
+</script></body></html>
