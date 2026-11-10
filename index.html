@@ -24,7 +24,7 @@ label{display:block;margin:8px 0 2px;color:var(--mu);font-size:14px}.opt{display
 const ERAS=["旧石器・新石器","弥生・古墳","飛鳥","奈良","平安","室町","戦国・安土桃山","江戸","東京（明治）","大正・昭和","戦後"];
 const MODES=[["kaki","書き","ペンで答えを書いて自己採点"],["anki","暗記（クソ問）","キーボードで入力、自動判定"],["seiji","年代整序","3つの出来事を年代順に"],["dochi","これどっち？","2択で正しい方を選ぶ"],["daigaku","大学過去問","選択式・記述式の過去問"]];
 const MN=Object.fromEntries(MODES.map(m=>[m[0],m[1]]));
-let db,uid,admin=false,Q=[],REV=new Set(),LOG=[],S={},P;
+let admin=false,Q=[],REV=new Set(),LOG=[],S={};
 const A=document.getElementById("app");
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const norm=s=>String(s).normalize("NFKC").replace(/\s+/g,"").toLowerCase();
@@ -33,25 +33,25 @@ const eraOpts=(all,sel)=>ERAS.map(e=>`<option ${e===sel?"selected":""}>${e}</opt
 const modeOpts=sel=>MODES.map(m=>`<option value="${m[0]}" ${m[0]===sel?"selected":""}>${m[1]}</option>`).join("");
 const $=id=>document.getElementById(id);
 function toast(t){alert(t)}
-async function init(){
- try{
-  const u=await claude.use("user"),d=await claude.use("db");
-  if(!u||!d){A.innerHTML='<h1>日本史一問一答</h1><p>ログインした状態で、共有リンクからこのページを開いてください。データベースが利用できません。</p>';return}
-  db=d;uid=await u.id();admin=!!u.canEdit();P="data/users/"+uid;await load();home();
- }catch(e){A.innerHTML="<p>起動に失敗しました："+esc(e.message||e)+"</p>"}
-}
-async function load(){
- const [q,m]=await Promise.all([db.collection("questions").get(),db.collection(P).get()]);
- Q=q.docs.map(d=>({id:d.id,...d.data()}));LOG=[];REV=new Set();
- m.docs.forEach(d=>{const x=d.data();if(d.id[0]==="l")LOG.push(x);else if(d.id.startsWith("r_"))REV.add(x.qid)});
-}
+const KEY="nihonshi_v1";let D={Q:[],LOG:[],REV:[],pin:""};
+function persist(){try{localStorage.setItem(KEY,JSON.stringify(D));return true}catch(e){toast("保存に失敗しました（容量不足またはブラウザの制限）："+(e.message||e));return false}}
+function load(){try{const r=localStorage.getItem(KEY);if(r)D=Object.assign(D,JSON.parse(r))}catch(e){}Q=D.Q;LOG=D.LOG;REV=new Set(D.REV)}
+function init(){load();home()}
 function home(){
  S={};
  A.innerHTML=`<h1>日本史一問一答</h1><div class="g g2">${MODES.map(m=>`<button class="c" onclick="modeScr('${m[0]}')"><b>${m[1]}</b><small>${m[2]}</small></button>`).join("")}</div>
  <h2>メニュー</h2><div class="g g2"><button class="c" onclick="stats()">学習記録</button><button class="c" onclick="modeScr('')">復習問題（全モード）<small>復習対象 ${REV.size} 問</small></button>
- ${admin?'<button class="c" onclick="adm()">管理者画面</button>':""}<button class="c" onclick="sett()">設定</button></div><p class="mu">登録問題数：${Q.length}</p>`;
+ ${admin?'<button class="c" onclick="adm()">管理者画面</button>':""}<button class="c" onclick="sett()">設定</button></div><p class="mu">登録問題数：${Q.length}（このブラウザに保存）</p>`;
 }
-function sett(){A.innerHTML=`<h1>設定</h1><label>表示テーマ</label><select onchange="document.documentElement.dataset.theme=this.value"><option value="">端末に合わせる</option><option value="light">ライト</option><option value="dark">ダーク</option></select><p class="mu">権限：${admin?"管理者":"一般ユーザー"}</p><button class="b" onclick="home()">戻る</button>`}
+function sett(){A.innerHTML=`<h1>設定</h1><label>表示テーマ</label><select onchange="document.documentElement.dataset.theme=this.value"><option value="">端末に合わせる</option><option value="light">ライト</option><option value="dark">ダーク</option></select>
+<h2>管理者モード</h2><p class="mu">現在：${admin?"オン":"オフ"}（このブラウザ内の簡易ロックで、本格的なセキュリティではありません）</p><button class="b s" onclick="toggleAdmin()">${admin?"オフにする":"オンにする"}</button>
+<h2>バックアップ</h2><p class="mu">データはこのブラウザにのみ保存されます。端末間の移行は下のテキストで行ってください。</p><div class="r"><button class="b s" onclick="expo()">書き出し</button><button class="b s" onclick="impo()">読み込み（上書き）</button></div><textarea id="bk" rows="5"></textarea>
+<div class="r"><button class="b" onclick="home()">戻る</button></div>`}
+function toggleAdmin(){if(admin){admin=false;return sett()}
+ if(!D.pin){const p=prompt("管理者パスコードを新しく設定してください");if(!p)return;D.pin=p;if(!persist())return}
+ else if(prompt("管理者パスコード")!==D.pin)return toast("パスコードが違います");admin=true;sett()}
+function expo(){$("bk").value=JSON.stringify({Q:D.Q,LOG:D.LOG,REV:D.REV});$("bk").select()}
+function impo(){try{const x=JSON.parse($("bk").value);if(!Array.isArray(x.Q)||!Array.isArray(x.LOG)||!Array.isArray(x.REV))throw 0;if(!confirm("現在のデータを上書きします。よろしいですか？"))return;D.Q=x.Q;D.LOG=x.LOG;D.REV=x.REV;persist();load();toast("読み込みました");home()}catch(e){toast("形式が正しくありません")}}
 function modeScr(m){
  S.mode=m;S.rev=false;
  A.innerHTML=`<h1>${m?MN[m]:"復習問題"}</h1><div class="r"><button class="b" id="t0" onclick="S.rev=false;t0.classList.add('on');t1.classList.remove('on')">解答</button><button class="b s" id="t1" onclick="S.rev=true;t1.classList.add('on');t0.classList.remove('on')">復習</button></div>
@@ -98,13 +98,11 @@ function judge(){
  $("body").querySelectorAll("button,input,select").forEach(e=>e.disabled=true);
  $("out").innerHTML=`<div class="res ${ok?"ok":"ng"}"><b>${ok?"正解！":"不正解"}</b><br>${ans}${q.exp?"<br>"+esc(q.exp):""}</div><div class="r"><button class="b" onclick="fin(${ok},1)">${S.i+1<S.list.length?"次の問題":"結果を見る"}</button></div>`;S.done=true;S.pend=ok;
 }
-async function fin(ok,already){
+function fin(ok){
  const q=S.list[S.i];
- try{
-  const at=Date.now(),l={kind:"log",qid:q.id,mode:q.mode,era:S.era,qera:q.era,ok,at};
-  await db.collection(P).doc("l"+at+Math.random().toString(36).slice(2,6)).set(l);LOG.push(l);
-  if(ok){await db.collection(P).doc("r_"+q.id).delete();REV.delete(q.id)}else{await db.collection(P).doc("r_"+q.id).set({kind:"rev",qid:q.id});REV.add(q.id)}
- }catch(e){toast("記録の保存に失敗しました："+(e.message||e))}
+ LOG.push({qid:q.id,mode:q.mode,era:S.era,qera:q.era,ok,at:Date.now()});
+ if(ok)REV.delete(q.id);else REV.add(q.id);
+ D.LOG=LOG;D.REV=[...REV];persist();
  if(ok)S.ok++;S.i++;
  if(S.i>=S.list.length){A.innerHTML=`<h1>結果</h1><p class="q">${S.ok} / ${S.list.length} 問正解</p><div class="r"><button class="b s" onclick="home()">ホーム</button><button class="b" onclick="stats()">学習記録</button></div>`}else show();
 }
@@ -124,7 +122,7 @@ function adm(){
  <input type="text" placeholder="検索" value="${esc(f.s)}" style="margin-top:8px" onchange="S.af.s=this.value;adm()"><p class="mu">${L.length} / ${Q.length} 件（表示は最大200件）</p>
  ${L.slice(0,200).map(q=>`<div class="row"><span>[${MN[q.mode]}・${esc(q.era)}] ${esc(q.q)}</span><button class="b s" onclick="frm('${q.id}')">編集</button><button class="b ng" onclick="del('${q.id}')">削除</button></div>`).join("")}`;
 }
-async function del(id){if(!confirm("削除しますか？"))return;try{await db.collection("questions").doc(id).delete();Q=Q.filter(q=>q.id!==id);adm()}catch(e){toast("削除失敗："+(e.message||e))}}
+function del(id){if(!confirm("削除しますか？"))return;D.Q=Q=Q.filter(q=>q.id!==id);D.REV=D.REV.filter(x=>x!==id);REV.delete(id);persist();adm()}
 function frm(id){
  const q=Q.find(x=>x.id===id)||{mode:"anki",era:ERAS[0],ev:[{},{},{}]};S.eid=id||null;
  const F=(c,l,h)=>`<div class="f ${c}" data-m="${c}"><label>${l}</label>${h}</div>`;
@@ -140,7 +138,7 @@ function frm(id){
  <label>解説</label><textarea id="fx" rows="3">${esc(q.exp)}</textarea><div class="r"><button class="b s" onclick="adm()">キャンセル</button><button class="b" onclick="save()">保存</button></div>`;fv();
 }
 function fv(){const m=$("fm").value;document.querySelectorAll(".f").forEach(e=>e.classList.toggle("v",e.dataset.m.split(" ").includes(m)))}
-async function save(){
+function save(){
  const m=$("fm").value,g=i=>$(i)?$(i).value.trim():"",lines=i=>g(i).split("\n").map(s=>s.trim()).filter(Boolean);
  const d={mode:m,era:g("fe"),q:g("fq"),exp:g("fx"),updated:Date.now()};
  if(!d.q)return toast("問題文を入力してください");
@@ -150,11 +148,8 @@ async function save(){
   if(new Set(d.ev.map(e=>e.y)).size<3)return toast("年代が同じ出来事があります。順序が一意になるよう年代を修正してください");d.ord=[0,1,2].sort((a,b)=>d.ev[a].y-d.ev[b].y)}
  if(m==="daigaku"){d.univ=g("fu");d.year=g("fy");d.type=g("ft");d.a=g("fa");if(!d.univ||!d.a)return toast("大学名と正解を入力してください");
   if(d.type==="choice"){d.choices=lines("fc");if(d.choices.length<2||!(+d.a>=1&&+d.a<=d.choices.length))return toast("選択肢を2つ以上、正解は番号で入力してください")}else d.alts=lines("fl")}
- try{
-  if(S.eid){await db.collection("questions").doc(S.eid).update(d);Object.assign(Q.find(x=>x.id===S.eid),d)}
-  else{d.created=Date.now();const r=await db.collection("questions").add(d);Q.push({id:r.id,...d})}
-  adm();
- }catch(e){toast("保存に失敗しました："+(e.message||e))}
+ if(S.eid){Object.assign(Q.find(x=>x.id===S.eid),d)}else{d.created=Date.now();d.id="q"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);Q.push(d)}
+ D.Q=Q;persist();adm();
 }
 init();
 </script></body></html>
