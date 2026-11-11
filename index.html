@@ -34,9 +34,12 @@ const modeOpts=sel=>MODES.map(m=>`<option value="${m[0]}" ${m[0]===sel?"selected
 const $=id=>document.getElementById(id);
 function toast(t){alert(t)}
 const KEY="nihonshi_v1";let D={Q:[],LOG:[],REV:[],pin:""};
-function persist(){try{localStorage.setItem(KEY,JSON.stringify(D));return true}catch(e){toast("保存に失敗しました（容量不足またはブラウザの制限）："+(e.message||e));return false}}
+function persist(){try{localStorage.setItem(KEY,JSON.stringify(D));bk();return true}catch(e){toast("保存に失敗しました（容量不足またはブラウザの制限）："+(e.message||e));return false}}
 function load(){try{const r=localStorage.getItem(KEY);if(r)D=Object.assign(D,JSON.parse(r))}catch(e){}Q=D.Q;LOG=D.LOG;REV=new Set(D.REV)}
-function init(){load();home()}
+let BT,UID,DB;
+function bk(){clearTimeout(BT);BT=setTimeout(async()=>{if(!DB)return;try{const s=JSON.stringify({Q:D.Q,LOG:D.LOG,REV:D.REV,pin:D.pin}),n=Math.ceil(s.length/90000)||1,c=DB.collection("data/users/"+UID);for(let i=0;i<n;i++)await c.doc("b"+i).set({s:s.slice(i*90000,(i+1)*90000)});await c.doc("bmeta").set({n,at:Date.now()})}catch(e){}},1500)}
+async function restore(){try{const c=DB.collection("data/users/"+UID),m=await c.doc("bmeta").get();if(!m.exists)return;let s="";for(let i=0;i<m.data().n;i++)s+=(await c.doc("b"+i).get()).data().s;const x=JSON.parse(s);if(D.Q.length||D.LOG.length)return;D=Object.assign(D,x);localStorage.setItem(KEY,JSON.stringify(D));load();home()}catch(e){}}
+async function init(){load();home();try{const u=await claude.use("user"),d=await claude.use("db");if(!u||!d)return;DB=d;UID=await u.id();if(!D.Q.length&&!D.LOG.length)await restore();else bk()}catch(e){}}
 function home(){
  S={};
  A.innerHTML=`<h1>日本史一問一答</h1><div class="g g2">${MODES.map(m=>`<button class="c" onclick="modeScr('${m[0]}')"><b>${m[1]}</b><small>${m[2]}</small></button>`).join("")}</div>
@@ -45,7 +48,7 @@ function home(){
 }
 function sett(){A.innerHTML=`<h1>設定</h1><label>表示テーマ</label><select onchange="document.documentElement.dataset.theme=this.value"><option value="">端末に合わせる</option><option value="light">ライト</option><option value="dark">ダーク</option></select>
 <h2>管理者モード</h2><p class="mu">現在：${admin?"オン":"オフ"}（このブラウザ内の簡易ロックで、本格的なセキュリティではありません）</p><button class="b s" onclick="toggleAdmin()">${admin?"オフにする":"オンにする"}</button>
-<h2>バックアップ</h2><p class="mu">データはこのブラウザにのみ保存されます。端末間の移行は下のテキストで行ってください。</p><div class="r"><button class="b s" onclick="expo()">書き出し</button><button class="b s" onclick="impo()">読み込み（上書き）</button></div><textarea id="bk" rows="5"></textarea>
+<h2>バックアップ</h2><p class="mu">${DB?"クラウド自動バックアップ：有効（ブラウザのデータを消しても、同じアカウントで開けば復元されます）":"クラウド自動バックアップ：無効（このブラウザのみに保存。定期的に書き出してください）"}端末間の移行は下のテキストでも行えます。</p><div class="r"><button class="b s" onclick="expo()">書き出し</button><button class="b s" onclick="impo()">読み込み（上書き）</button></div><textarea id="bk" rows="5"></textarea>
 <div class="r"><button class="b" onclick="home()">戻る</button></div>`}
 function toggleAdmin(){if(admin){admin=false;return sett()}
  if(!D.pin){const p=prompt("管理者パスコードを新しく設定してください");if(!p)return;D.pin=p;if(!persist())return}
@@ -79,7 +82,7 @@ function show(){
   S.disp=shuf([0,1,2]);const perms=["1→2→3","1→3→2","2→1→3","2→3→1","3→1→2","3→2→1"];
   b.innerHTML=S.disp.map((x,k)=>`<div class="c" style="margin:6px 0"><b>${k+1}.</b> ${esc(q.ev[x].t)}</div>`).join("")+`<label>古い順に並べると</label><select id="ans">${perms.map(p=>`<option>${p}</option>`).join("")}</select><div class="r"><button class="b" onclick="judge()">解答</button></div>`;
  }else{
-  S.opts=q.mode==="dochi"?shuf([q.a,q.b]).map(t=>({t,ok:t===q.a})):q.choices.map((t,k)=>({t,ok:String(k+1)===String(q.a)}));
+  S.opts=q.wrongs?shuf([q.a,...q.wrongs]).map(t=>({t,ok:t===q.a})):q.mode==="dochi"?shuf([q.a,q.b]).map(t=>({t,ok:t===q.a})):q.choices.map((t,k)=>({t,ok:String(k+1)===String(q.a)}));
   b.innerHTML=S.opts.map((o,k)=>`<label class="opt"><input type="radio" name="o" value="${k}">${esc(o.t)}</label>`).join("")+`<div class="r"><button class="b" onclick="judge()">解答</button></div>`;
  }
 }
@@ -124,16 +127,16 @@ function adm(){
 }
 function del(id){if(!confirm("削除しますか？"))return;D.Q=Q=Q.filter(q=>q.id!==id);D.REV=D.REV.filter(x=>x!==id);REV.delete(id);persist();adm()}
 function frm(id){
- const q=Q.find(x=>x.id===id)||{mode:"anki",era:ERAS[0],ev:[{},{},{}]};S.eid=id||null;
+ const q=Q.find(x=>x.id===id)||{mode:"anki",era:ERAS[0],ev:[{},{},{}]};S.eid=id||null;const oc=q.mode==="daigaku"&&q.type==="choice"&&!q.wrongs&&q.choices;const aV=oc?q.choices[q.a-1]:q.a;const wr=q.wrongs||(oc?q.choices.filter((_,k)=>k!==q.a-1):(q.b?[q.b]:[]));const WI=p=>[0,1,2,3,4].map(i=>`<input type="text" id="${p}${i}" value="${esc(wr[i])}" style="margin-bottom:6px">`).join("");
  const F=(c,l,h)=>`<div class="f ${c}" data-m="${c}"><label>${l}</label>${h}</div>`;
  A.innerHTML=`<h1>${id?"問題の編集":"問題の新規登録"}</h1><label>解答モード</label><select id="fm" onchange="fv()">${modeOpts(q.mode)}</select><label>時代</label><select id="fe">${eraOpts(false,q.era)}</select>
  ${F("daigaku","大学名",`<input type="text" id="fu" value="${esc(q.univ)}">`)}${F("daigaku","出題年度",`<input type="text" id="fy" value="${esc(q.year)}">`)}
  ${F("daigaku","解答方式",`<select id="ft"><option value="text" ${q.type!=="choice"?"selected":""}>記述式</option><option value="choice" ${q.type==="choice"?"selected":""}>選択肢式</option></select>`)}
  <label>問題文</label><textarea id="fq" rows="3">${esc(q.q)}</textarea>
- ${F("kaki anki daigaku","正解（選択肢式は正解の番号）",`<input type="text" id="fa" value="${esc(q.a)}">`)}
+ ${F("kaki anki daigaku","正解（選択肢式は正解の選択肢の文章）",`<input type="text" id="fa" value="${esc(aV)}">`)}
  ${F("anki daigaku","別解（1行に1つ）",`<textarea id="fl" rows="2">${esc((q.alts||[]).join("\n"))}</textarea>`)}
- ${F("dochi","正解の選択肢",`<input type="text" id="fda" value="${esc(q.mode==="dochi"?q.a:"")}">`)}${F("dochi","誤りの選択肢",`<input type="text" id="fdb" value="${esc(q.b)}">`)}
- ${F("daigaku","選択肢（選択肢式のみ、1行に1つ）",`<textarea id="fc" rows="4">${esc((q.choices||[]).join("\n"))}</textarea>`)}
+ ${F("dochi","正解の選択肢",`<input type="text" id="fda" value="${esc(q.mode==="dochi"?q.a:"")}">`)}${F("dochi","誤りの選択肢（最大5個、空欄は無視）",WI("fdb"))}
+ ${F("daigaku","誤りの選択肢（選択肢式のみ、最大5個、空欄は無視）",WI("fdw"))}
  ${[0,1,2].map(i=>F("seiji","出来事"+"ABC"[i]+"と年代（西暦の数値）",`<div class="r"><input type="text" id="et${i}" value="${esc(q.ev?.[i]?.t)}"><input type="number" id="ey${i}" value="${esc(q.ev?.[i]?.y)}" style="max-width:120px"></div>`)).join("")}
  <label>解説</label><textarea id="fx" rows="3">${esc(q.exp)}</textarea><div class="r"><button class="b s" onclick="adm()">キャンセル</button><button class="b" onclick="save()">保存</button></div>`;fv();
 }
@@ -143,11 +146,11 @@ function save(){
  const d={mode:m,era:g("fe"),q:g("fq"),exp:g("fx"),updated:Date.now()};
  if(!d.q)return toast("問題文を入力してください");
  if(m==="kaki"||m==="anki"){d.a=g("fa");if(!d.a)return toast("正解を入力してください");if(m==="anki")d.alts=lines("fl")}
- if(m==="dochi"){d.a=g("fda");d.b=g("fdb");if(!d.a||!d.b||d.a===d.b)return toast("2つの異なる選択肢を入力してください")}
+ if(m==="dochi"){d.a=g("fda");d.wrongs=[0,1,2,3,4].map(i=>g("fdb"+i)).filter(Boolean);if(!d.a||!d.wrongs.length||new Set([d.a,...d.wrongs]).size!==d.wrongs.length+1)return toast("正解と誤りの選択肢を入力してください（重複不可）")}
  if(m==="seiji"){d.ev=[0,1,2].map(i=>({t:g("et"+i),y:Number(g("ey"+i))}));if(d.ev.some(e=>!e.t||!g("ey"+(d.ev.indexOf(e)))))return toast("出来事と年代を3つとも入力してください");
   if(new Set(d.ev.map(e=>e.y)).size<3)return toast("年代が同じ出来事があります。順序が一意になるよう年代を修正してください");d.ord=[0,1,2].sort((a,b)=>d.ev[a].y-d.ev[b].y)}
  if(m==="daigaku"){d.univ=g("fu");d.year=g("fy");d.type=g("ft");d.a=g("fa");if(!d.univ||!d.a)return toast("大学名と正解を入力してください");
-  if(d.type==="choice"){d.choices=lines("fc");if(d.choices.length<2||!(+d.a>=1&&+d.a<=d.choices.length))return toast("選択肢を2つ以上、正解は番号で入力してください")}else d.alts=lines("fl")}
+  if(d.type==="choice"){d.wrongs=[0,1,2,3,4].map(i=>g("fdw"+i)).filter(Boolean);if(!d.wrongs.length||new Set([d.a,...d.wrongs]).size!==d.wrongs.length+1)return toast("誤りの選択肢を1つ以上入力してください（正解と重複不可）")}else d.alts=lines("fl")}
  if(S.eid){Object.assign(Q.find(x=>x.id===S.eid),d)}else{d.created=Date.now();d.id="q"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);Q.push(d)}
  D.Q=Q;persist();adm();
 }
